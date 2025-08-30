@@ -1,24 +1,67 @@
+import { db } from '../db';
 import { type CreateGameInput, type Game } from '../schema';
+import { sql, eq } from 'drizzle-orm';
 
-export async function createGame(input: CreateGameInput): Promise<Game> {
-    // This is a placeholder declaration! Real code should be implemented here.
-    // The goal of this handler is to create a new lotto game with a unique room code.
-    // It should:
-    // 1. Generate or validate the room code is unique
-    // 2. Create a new game record in the database with 'waiting' status
-    // 3. Set max_players and initialize other fields
-    // 4. Return the created game object
+export const createGame = async (input: CreateGameInput): Promise<Game> => {
+  try {
+    // Check if room code already exists using raw SQL
+    const existingGameResult = await db.execute(sql`
+      SELECT id FROM games WHERE room_code = ${input.room_code}
+    `);
+
+    if (existingGameResult.rows.length > 0) {
+      throw new Error(`Room code ${input.room_code} already exists`);
+    }
+
+    // Insert new game record using raw SQL since schema is not available
+    const result = await db.execute(sql`
+      INSERT INTO games (
+        room_code, 
+        status, 
+        max_players, 
+        current_players, 
+        drawn_numbers, 
+        draw_order,
+        created_at
+      ) VALUES (
+        ${input.room_code},
+        'waiting',
+        ${input.max_players},
+        0,
+        '[]'::jsonb,
+        0,
+        NOW()
+      )
+      RETURNING 
+        id,
+        room_code,
+        status,
+        max_players,
+        current_players,
+        drawn_numbers,
+        draw_order,
+        created_at,
+        started_at,
+        completed_at
+    `);
+
+    const game = result.rows[0] as any;
     
-    return Promise.resolve({
-        id: 1,
-        room_code: input.room_code,
-        status: 'waiting' as const,
-        max_players: input.max_players,
-        current_players: 0,
-        drawn_numbers: [],
-        draw_order: 0,
-        created_at: new Date(),
-        started_at: null,
-        completed_at: null
-    } as Game);
-}
+    // Convert and return properly typed game object
+    return {
+      id: game.id,
+      room_code: game.room_code,
+      status: game.status,
+      max_players: game.max_players,
+      current_players: game.current_players,
+      drawn_numbers: Array.isArray(game.drawn_numbers) ? game.drawn_numbers : JSON.parse(game.drawn_numbers || '[]'), // Handle both JSON string and array
+      draw_order: game.draw_order,
+      created_at: new Date(game.created_at),
+      started_at: game.started_at ? new Date(game.started_at) : null,
+      completed_at: game.completed_at ? new Date(game.completed_at) : null
+    };
+  } catch (error) {
+    console.error('Game creation failed:', error);
+    throw error;
+  }
+};
